@@ -25,6 +25,7 @@ void RJson::parseJson()
 	cleanWhitespace();
 	parse_code code;
 	if ((code = parseValue(&v)) == PARSE_OK) {
+		cleanWhitespace();
 		if (*json != '\0') {
 			code = PARSE_NOT_SINGULAR_VALUE;
 		}
@@ -317,7 +318,7 @@ parse_code RJson::parseObject(json_value_t* v)
 			memcpy(v->pair = new json_pair_t[sumsize], popJson(sumsize), sumsize);
 			return PARSE_OK;
 		} else {
-			ret = PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+			ret = PARSE_MISS_COMMA_OR_CURLY_BRACKET;
 			break;
 		}
 	}
@@ -337,8 +338,49 @@ parse_code RJson::parseArray(json_value_t* v)
 {
 	eatChar('[');
 	cleanWhitespace();
-    parse_code ret = PARSE_INVALID_VALUE;
-    return ret;
+	if (*json == ']') {
+		++json;
+		v->type = RJSON_ARRAY;
+		v->pair = nullptr;
+		v->arrSize = 0;
+		return PARSE_OK;
+	}
+
+	size_t sz = 0;
+	parse_code ret = PARSE_INVALID_VALUE;
+
+	while (true) {
+		v->type = RJSON_NULL;
+		json_value_t value;
+		value.type = RJSON_NULL;
+
+		if ((ret = parseValue(&value)) != PARSE_OK)
+			break;
+		memcpy(pushJson(sizeof(json_value_t)), &value, sizeof(json_value_t));
+		++sz;
+
+		cleanWhitespace();
+		if (*json == ',') {
+			++json;
+			cleanWhitespace();
+		} else if (*json == ']') {
+			++json;
+			v->type = RJSON_ARRAY;
+			v->arrSize = sz;
+			sz *= sizeof(json_value_t);
+			memcpy(v->elem = new json_value_t[sz], popJson(sz), sz);
+			return PARSE_OK;
+		} else {
+			ret = PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+			break;
+		}
+	}
+
+	for (size_t i = 0; i < sz; ++i)
+		freeValue((json_value_t*)popJson(sizeof(json_value_t)));
+
+	v->type = RJSON_NULL;
+	return ret;
 }
 
 void RJson::freeValue(json_value_t* v)
@@ -355,12 +397,11 @@ void RJson::freeValue(json_value_t* v)
 			}
 			delete [] v->pair;
 			break;
-//		case RJSON_ARRAY:
-//			for (int i = 0; i < v->arrSize; ++i) {
-//				freeValue(&v->elem[i]);
-//			}
-//			delete [] v->elem;
-//			break;
+		case RJSON_ARRAY:
+			for (size_t i = 0; i < v->arrSize; ++i)
+				freeValue(&v->elem[i]);
+			delete [] v->elem;
+			break;
 		default:
 			break;
 	}
@@ -377,7 +418,13 @@ void RJson::parseCodeHandle(parse_code code)
 		case PARSE_INVALID_VALUE:
 			cout << "Invalid value."; break;
 		case PARSE_MISS_COLON:
-			cout << "Miss colon." << endl; break;
+			cout << "Miss colon in object." << endl; break;
+		case PARSE_MISS_COMMA_OR_SQUARE_BRACKET:
+			cout << "Miss comma or square in array." << endl; break;
+		case PARSE_MISS_COMMA_OR_CURLY_BRACKET:
+			cout << "Miss comma or curly bracket in object." << endl; break;
+		case PARSE_MISS_KEY:
+			cout << "Miss key in object." << endl; break;
 		case PARSE_NOT_SINGULAR_VALUE:
 			cout << "Not singular value." << endl; break;
 		case PARSE_NUMBER_TOO_BIG:
