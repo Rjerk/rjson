@@ -72,7 +72,6 @@ public:
 	RJson(const string& js);
 	~RJson();
 	void parseJson();
-	string generator();
 private:
 	parse_code parseValue(json_value_t* v);
 	parse_code parseLiteral(json_value_t* v, const string& literal, json_type type);
@@ -86,6 +85,7 @@ private:
 	void freeValue(json_value_t* v);
 	void setString(json_value_t* v, const char* str, size_t len);
 	void parseCodeHandle(parse_code code);
+	string generator();
 	void encodeUTF8(unsigned u);
 	const char* parse4HexDigits(const char* p, unsigned* u);
 	void cleanWhitespace() { while (isspace(*json)) ++json; }
@@ -93,7 +93,7 @@ private:
 	bool isdigit_1to9(char ch) { return ch != '0' && isdigit(ch); }
 private:
 	const char* json;
-	json_value_t jsonValue;
+	json_value_t v;
 private:
 	char* stack;
 	size_t top;

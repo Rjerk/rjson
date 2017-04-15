@@ -11,6 +11,7 @@ RJson::RJson(const string& js)
 	stack = new char[STACK_INIT_SIZE];
 	top = 0;
 	size = STACK_INIT_SIZE;
+	v.type = RJSON_NULL;
 }
 
 RJson::~RJson()
@@ -21,8 +22,6 @@ RJson::~RJson()
 
 void RJson::parseJson()
 {
-	json_value_t v;
-	v.type = RJSON_NULL;
 	cleanWhitespace();
 	parse_code code;
 	if ((code = parseValue(&v)) == PARSE_OK) {
@@ -30,7 +29,6 @@ void RJson::parseJson()
 			code = PARSE_NOT_SINGULAR_VALUE;
 		}
 	}
-	jsonValue = v;
 	parseCodeHandle(code);
 }
 
@@ -72,12 +70,52 @@ parse_code RJson::parseLiteral(json_value_t* v, const string& literal, const jso
 	return PARSE_OK;
 }
 
+parse_code RJson::parseNumber(json_value_t* v)
+{
+	const char* p = json;
+	if (*p == '-')
+		++p;
+
+	if (*p == '0') {
+		++p;
+	} else {
+		if (!isdigit_1to9(*p)) return PARSE_INVALID_VALUE;
+		while (isdigit(*p)) ++p;
+	}
+
+	if (*p == '.') {
+		++p;
+		if (!isdigit(*p)) return PARSE_INVALID_VALUE;
+		while (isdigit(*p)) ++p;
+	}
+
+	if (*p == 'e' || *p == 'E') {
+		++p;
+		if (*p == '+' || *p == '-')
+			++p;
+		if (!isdigit(*p)) return PARSE_INVALID_VALUE;
+		while (isdigit(*p)) ++p;
+	}
+	errno = 0;
+	double d = std::strtod(json, NULL);
+	if ((errno == ERANGE) || (d == HUGE_VAL) || (d == -HUGE_VAL))
+		return PARSE_NUMBER_TOO_BIG;
+	v->num = d;
+	v->type = RJSON_NUMBER;
+	json = p;
+	return PARSE_OK;
+}
+
 void* RJson::pushJson(size_t sz)
 {
-	if (sz + top >= size) {
-		while (size <= sz)
-			size <<= 1;
-	}
+	assert(sz > 0);
+	while (sz + top >= size)
+		size += (size >> 1);
+	char* tmp = new char[size];
+	memcpy(tmp, stack, top);
+	stack = tmp;
+	tmp = nullptr;
+
 	int t = top;
 	top += sz;
 	return stack + t;
@@ -86,7 +124,7 @@ void* RJson::pushJson(size_t sz)
 void* RJson::popJson(size_t sz)
 {
 	assert(sz <= top);
-	return stack += (top -= sz);
+	return stack + (top -= sz);
 }
 
 const char* RJson::parse4HexDigits(const char* p, unsigned* u)
@@ -137,6 +175,7 @@ parse_code RJson::parseStringRaw(json_value_t* v, char** str, size_t* len)
 			case '\"':
 				*len = top - pos;
 				*str = (char*)popJson(*len);
+				//*str[*len] = '\0';
 				json = p;
 				return PARSE_OK;
 			case '\\': {
@@ -156,7 +195,6 @@ parse_code RJson::parseStringRaw(json_value_t* v, char** str, size_t* len)
 						}
 						// first codepoint is high surrogate, then handle low surrogate
 						if (u >= 0xD800 && u <= 0xDBFF) {
-							cout << "lows" << endl;
 							if (*p++ != '\\') {
 								top = pos;
 								return PARSE_INVALID_UNICODE_SURROGATE;
@@ -198,31 +236,6 @@ parse_code RJson::parseStringRaw(json_value_t* v, char** str, size_t* len)
 	}
 }
 
-void RJson::freeValue(json_value_t* v)
-{
-	switch (v->type) {
-		case RJSON_STRING:
-			delete [] v->s;
-			break;
-		case RJSON_OBJECT:
-			for (int i = 0; i < v->objSize; ++i) {
-				delete [] v->pair[i].str;
-				freeValue(&v->pair[i].value);
-			}
-			delete [] v->pair;
-			break;
-		case RJSON_ARRAY:
-			for (int i = 0; i < v->arrSize; ++i) {
-				freeValue(&v->elem[i]);
-			}
-			delete [] v->elem;
-			break;
-		default:
-			break;
-	}
-	v->type = RJSON_NULL;
-}
-
 void RJson::setString(json_value_t*v, const char* str, size_t len)
 {
 	assert(v != NULL && (str != NULL || len == 0));
@@ -245,43 +258,6 @@ parse_code RJson::parseString(json_value_t* v)
 	return ret;
 }
 
-parse_code RJson::parseNumber(json_value_t* v)
-{
-	const char* p = json;
-	if (*p == '-')
-		++p;
-
-	if (*p == '0') {
-		++p;
-	} else {
-		if (!isdigit_1to9(*p)) return PARSE_INVALID_VALUE;
-		while (isdigit(*p)) ++p;
-	}
-
-	if (*p == '.') {
-		++p;
-		if (!isdigit(*p)) return PARSE_INVALID_VALUE;
-		while (isdigit(*p)) ++p;
-	}
-
-	if (*p == 'e' || *p == 'E') {
-		++p;
-		if (*p == '+' || *p == '-')
-			++p;
-		if (!isdigit(*p)) return PARSE_INVALID_VALUE;
-		while (isdigit(*p)) ++p;
-	}
-	errno = 0;
-	double d = std::strtod(json, NULL);
-	if ((errno == ERANGE) || (d == HUGE_VAL) || (d == -HUGE_VAL))
-		return PARSE_NUMBER_TOO_BIG;
-	v->num = d;
-	v->type = RJSON_NUMBER;
-	json = p;
-	cout << d << endl;
-	return PARSE_OK;
-}
-
 parse_code RJson::parseObject(json_value_t* v)
 {
 	eatChar('{');
@@ -293,25 +269,28 @@ parse_code RJson::parseObject(json_value_t* v)
 		v->objSize = 0;
 		return PARSE_OK;
 	}
-	
+
 	json_pair_t pair;
-	pair.str = nullptr;
 	size_t sz = 0;
 	parse_code ret = PARSE_INVALID_VALUE;
-	
+
 	while (true) {
 		char* str = nullptr;
 		v->type = RJSON_NULL;
+		pair.str = nullptr;
+		pair.len = 0;
+		pair.value.type = RJSON_NULL;
 		// parse string
 		if (*json != '\"') {
 			ret = PARSE_MISS_KEY;
 			break;
 		}
-		if ((ret = parseStringRaw(v, &str, &pair.len)) != PARSE_OK) 
+		if ((ret = parseStringRaw(v, &str, &pair.len)) != PARSE_OK)
 			break;
 		memcpy(pair.str = new char[pair.len+1], str, pair.len);
 		pair.str[pair.len] = '\0';
-		
+		str = nullptr;
+
 		cleanWhitespace();
 		if (*json != ':') {
 			ret = PARSE_MISS_COLON;
@@ -319,15 +298,13 @@ parse_code RJson::parseObject(json_value_t* v)
 		}
 		++json;
 		cleanWhitespace();
-		
 		// parse value
 		if ((ret = parseValue(&pair.value)) != PARSE_OK)
 			break;
-		
 		memcpy(pushJson(sizeof(json_pair_t)), &pair, sizeof(json_pair_t));
 		pair.str = nullptr;
 		++sz;
-		
+
 		cleanWhitespace();
 		if (*json == ',') {
 			++json;
@@ -344,14 +321,14 @@ parse_code RJson::parseObject(json_value_t* v)
 			break;
 		}
 	}
-	
+
 	delete [] pair.str;
-	for (int i = 0; i < sz; ++i) {
+	for (size_t i = 0; i < sz; ++i) {
 		json_pair_t* p = (json_pair_t*)popJson(sizeof(json_pair_t));
 		delete [] p->str;
 		freeValue(v);
 	}
-	
+
 	v->type = RJSON_NULL;
 	return ret;
 }
@@ -360,13 +337,43 @@ parse_code RJson::parseArray(json_value_t* v)
 {
 	eatChar('[');
 	cleanWhitespace();
+    parse_code ret = PARSE_INVALID_VALUE;
+    return ret;
+}
+
+void RJson::freeValue(json_value_t* v)
+{
+	assert(v != NULL);
+	switch (v->type) {
+		case RJSON_STRING:
+			delete [] v->s;
+			break;
+		case RJSON_OBJECT:
+			for (size_t i = 0; i < v->objSize; ++i) {
+				delete [] v->pair[i].str;
+				freeValue(&v->pair[i].value);
+			}
+			delete [] v->pair;
+			break;
+//		case RJSON_ARRAY:
+//			for (int i = 0; i < v->arrSize; ++i) {
+//				freeValue(&v->elem[i]);
+//			}
+//			delete [] v->elem;
+//			break;
+		default:
+			break;
+	}
+	v->type = RJSON_NULL;
 }
 
 void RJson::parseCodeHandle(parse_code code)
 {
 	switch (code) {
 		case PARSE_OK:
-			cout << "Parse ok." << endl; break;
+			cout << "Parse ok." << endl;
+			freeValue(&v);
+			break;
 		case PARSE_INVALID_VALUE:
 			cout << "Invalid value."; break;
 		case PARSE_MISS_COLON:
