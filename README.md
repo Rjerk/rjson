@@ -18,5 +18,10 @@
 ### object
 - {string : value}
 
-### array (undo)
+### array
 - [value ... ]
+
+### json generator (undo)
+
+## Reference
+> https://github.com/miloyip/json-tutorial
