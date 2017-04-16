@@ -3,7 +3,10 @@
 #include <sstream>
 #include <cstring>
 #include <cmath>
+
 const size_t STACK_INIT_SIZE = 100;
+
+bool isdigit_1to9(char ch) { return ch != '0' && isdigit(ch); }
 
 RJson::RJson(const string& js)
 {
@@ -16,6 +19,7 @@ RJson::RJson(const string& js)
 
 RJson::~RJson()
 {
+	freeValue(&v);
 	delete [] stack;
 	json = nullptr;
 }
@@ -26,21 +30,88 @@ void RJson::parseJson()
 	parse_code code;
 	if ((code = parseValue(&v)) == PARSE_OK) {
 		cleanWhitespace();
-		if (*json != '\0') {
+		if (*json != '\0')
 			code = PARSE_NOT_SINGULAR_VALUE;
-		}
 	}
 	parseCodeHandle(code);
 }
 
+void RJson::stringifyValue(json_value_t* v)
+{
+	switch (v->type) {
+		case RJSON_NULL: memcpy(pushJson(4), "null", 4); break;
+		case RJSON_FALSE: memcpy(pushJson(5), "false", 5); break;
+		case RJSON_TRUE: memcpy(pushJson(4), "true", 4); break;
+		case RJSON_NUMBER:
+			top -= (32 - sprintf((char*)pushJson(32), "%.17g", v->num));
+			break;
+		case RJSON_STRING:
+			stringifyString(v->s, v->len);
+			break;
+		case RJSON_OBJECT:
+			memcpy(pushJson(sizeof('{')), "{", sizeof('{'));
+			for (size_t i = 0; i < v->objSize; ++i) {
+				if (i > 0) {
+					memcpy(pushJson(sizeof(',')), ",", sizeof(','));
+				}
+				stringifyString(v->pair[i].str, v->pair[i].len);
+				memcpy(pushJson(sizeof(':')), ":", sizeof(':'));
+				stringifyValue(&v->pair[i].value);
+			}
+			memcpy(pushJson(sizeof('}')), "}", sizeof('}'));
+			break;
+		case RJSON_ARRAY:
+			memcpy(pushJson(sizeof('[')), "[", sizeof('['));
+			for (size_t i = 0; i < v->arrSize; ++i) {
+				if (i > 0)
+					memcpy(pushJson(sizeof(',')), ",", sizeof(','));
+				stringifyValue(&v->elem[i]);
+			}
+			memcpy(pushJson(sizeof(']')), "]", sizeof(']'));
+			break;
+		default:
+			assert(0 && "Invalid type");
+	}
+}
+
+void RJson::stringifyString(const char* str, size_t len)
+{
+	assert(str != nullptr);
+	const char hexDigits[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+	size_t size;
+	char* head = nullptr;
+	char* p = nullptr;
+	p = head = (char*)pushJson(size = len*6+2);// "\u00xx..."
+	*p++ = '"';
+	for (size_t i = 0; i < len; ++i) {
+		unsigned char ch = (unsigned char)str[i];
+		switch (ch) {
+			case '\"': *p++ = '\\'; *p++ = '\"'; break;
+            case '\\': *p++ = '\\'; *p++ = '\\'; break;
+            case '/':  *p++ = '\\'; *p++ = '/';  break;
+            case '\b': *p++ = '\\'; *p++ = 'b';  break;
+            case '\f': *p++ = '\\'; *p++ = 'f';  break;
+            case '\n': *p++ = '\\'; *p++ = 'n';  break;
+            case '\r': *p++ = '\\'; *p++ = 'r';  break;
+            case '\t': *p++ = '\\'; *p++ = 't';  break;
+            default:
+            	if (ch < 0x20) {
+            		*p++ = '\\'; *p++ = 'u'; *p++ = '0'; *p++ = '0';
+            		*p++ = hexDigits[ch >> 4];
+            		*p++ = hexDigits[ch & 15];
+				} else {
+					*p++ = str[i];
+				}
+		}
+	}
+	*p++ = '"';
+	top -= (size - (p - head));
+}
+
 string RJson::generator()
 {
-//	if (jsonValue.type == RJSON_STRING) {
-//		return string(jsonValue.s);
-//	} else {
-//		return string();
-//	}
-	return string();
+	stringifyValue(&v);
+	return string((const char*)popJson(top));
 }
 
 parse_code RJson::parseValue(json_value_t* v)
@@ -353,7 +424,7 @@ parse_code RJson::parseArray(json_value_t* v)
 		v->type = RJSON_NULL;
 		json_value_t value;
 		value.type = RJSON_NULL;
-
+		
 		if ((ret = parseValue(&value)) != PARSE_OK)
 			break;
 		memcpy(pushJson(sizeof(json_value_t)), &value, sizeof(json_value_t));
@@ -413,7 +484,6 @@ void RJson::parseCodeHandle(parse_code code)
 	switch (code) {
 		case PARSE_OK:
 			cout << "Parse ok." << endl;
-			freeValue(&v);
 			break;
 		case PARSE_INVALID_VALUE:
 			cout << "Invalid value."; break;

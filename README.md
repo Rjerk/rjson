@@ -1,5 +1,12 @@
 # A simple json parser for practice.
 
+## Compile && Run
+Read json from file.
+```
+sh build.sh
+./rjson test1.txt
+```
+
 ## Parser Support
 
 ### literal
@@ -21,7 +28,8 @@
 ### array
 - [value ... ]
 
-### json generator (undo)
+### json generator
+- generator json text
 
 ## Reference
 > https://github.com/miloyip/json-tutorial
