@@ -1,6 +1,5 @@
 #include <string>
 #include <iostream>
-#include <memory>
 #include <cassert>
 #include <cctype>
 
@@ -9,7 +8,6 @@ using std::cout;
 using std::endl;
 using std::cerr;
 using std::string;
-using std::shared_ptr;
 
 string getJsonFromFile(const string& filename);
 
@@ -71,8 +69,16 @@ class RJson {
 public:
 	RJson(const string& js);
 	~RJson();
-	void parseJson();
+	parse_code parseJson();
 	string generator();
+	void parseCodeHandle(parse_code code);
+	json_type getValueType(json_value_t* v);
+	double getNumber(json_value_t* v);
+	string getString(json_value_t* v);
+	size_t getStringLen(json_value_t* v);
+	size_t getObjectSize(json_value_t* v);
+	size_t getArraySize(json_value_t* v);
+	json_value_t* getValueFromObject(const char* str);
 private:
 	parse_code parseValue(json_value_t* v);
 	parse_code parseLiteral(json_value_t* v, const string& literal, json_type type);
@@ -87,7 +93,6 @@ private:
 	void stringifyString(const char* str, size_t len);
 	void freeValue(json_value_t* v);
 	void setString(json_value_t* v, const char* str, size_t len);
-	void parseCodeHandle(parse_code code);
 	void encodeUTF8(unsigned u);
 	const char* parse4HexDigits(const char* p, unsigned* u);
 	void cleanWhitespace() { while (isspace(*json)) ++json; }

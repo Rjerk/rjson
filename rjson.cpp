@@ -24,7 +24,7 @@ RJson::~RJson()
 	json = nullptr;
 }
 
-void RJson::parseJson()
+parse_code RJson::parseJson()
 {
 	cleanWhitespace();
 	parse_code code;
@@ -33,7 +33,89 @@ void RJson::parseJson()
 		if (*json != '\0')
 			code = PARSE_NOT_SINGULAR_VALUE;
 	}
-	parseCodeHandle(code);
+	return code;
+}
+
+json_type RJson::getValueType(json_value_t* val)
+{
+	assert(val);
+	return val->type;
+}
+
+double RJson::getNumber(json_value_t* val)
+{
+	assert(val && val->type == RJSON_NUMBER);
+	return val->num;
+}
+
+string RJson::getString(json_value_t* val)
+{
+	assert(val && val->type == RJSON_STRING);
+	return string(val->s);
+}
+
+size_t RJson::getStringLen(json_value_t* val)
+{
+	assert(val && val->type == RJSON_STRING);
+	return val->len;
+}
+
+size_t RJson::getObjectSize(json_value_t* val)
+{
+	assert(val && val->type == RJSON_OBJECT);
+	return val->objSize;
+}
+
+size_t RJson::getArraySize(json_value_t* val)
+{
+	assert(val && val->type == RJSON_ARRAY);
+	return val->arrSize;
+}
+
+json_value_t* RJson::getValueFromObject(const char* str)
+{
+	assert(v.type == RJSON_OBJECT && str != nullptr);
+	for (size_t i = 0; i < v.objSize; ++i) {
+		if (!strcmp(str, v.pair[i].str)) {
+			return &v.pair[i].value;
+		}
+	}
+	return nullptr;
+}
+
+
+void RJson::parseCodeHandle(parse_code code)
+{
+	switch (code) {
+		case PARSE_OK:
+			cout << "Parse ok." << endl; break;
+		case PARSE_INVALID_VALUE:
+			cout << "Invalid value."; break;
+		case PARSE_MISS_COLON:
+			cout << "Miss colon in object." << endl; break;
+		case PARSE_MISS_COMMA_OR_SQUARE_BRACKET:
+			cout << "Miss comma or square in array." << endl; break;
+		case PARSE_MISS_COMMA_OR_CURLY_BRACKET:
+			cout << "Miss comma or curly bracket in object." << endl; break;
+		case PARSE_MISS_KEY:
+			cout << "Miss key in object." << endl; break;
+		case PARSE_NOT_SINGULAR_VALUE:
+			cout << "Not singular value." << endl; break;
+		case PARSE_NUMBER_TOO_BIG:
+			cout << "Number is too big." << endl; break;
+		case PARSE_INVALID_ESCAPE_CHARCTER:
+			cout << "Invalid escaped character." << endl; break;
+		case PARSE_INVALID_UNICODE_HEX:
+			cout << "Invalid unicode hexadecimal digits." << endl; break;
+		case PARSE_MISS_QUOTATION_MARK:
+			cout << "Miss quotation mark in string." << endl; break;
+		case PARSE_INVALID_STRING_CHAR:
+			cout << "Invalid char in string." << endl; break;
+		case PARSE_INVALID_UNICODE_SURROGATE:
+			cout << "Invalid unicode surrogate in string." << endl; break;
+		default:
+			cout << "Unexpected error." << endl;
+	}
 }
 
 void RJson::stringifyValue(json_value_t* v)
@@ -477,44 +559,6 @@ void RJson::freeValue(json_value_t* v)
 			break;
 	}
 	v->type = RJSON_NULL;
-}
-
-void RJson::parseCodeHandle(parse_code code)
-{
-	switch (code) {
-		case PARSE_OK:
-			cout << "Parse ok." << endl;
-			break;
-		case PARSE_INVALID_VALUE:
-			cout << "Invalid value."; break;
-		case PARSE_MISS_COLON:
-			cout << "Miss colon in object." << endl; break;
-		case PARSE_MISS_COMMA_OR_SQUARE_BRACKET:
-			cout << "Miss comma or square in array." << endl; break;
-		case PARSE_MISS_COMMA_OR_CURLY_BRACKET:
-			cout << "Miss comma or curly bracket in object." << endl; break;
-		case PARSE_MISS_KEY:
-			cout << "Miss key in object." << endl; break;
-		case PARSE_NOT_SINGULAR_VALUE:
-			cout << "Not singular value." << endl; break;
-		case PARSE_NUMBER_TOO_BIG:
-			cout << "Number is too big." << endl; break;
-		case PARSE_INVALID_ESCAPE_CHARCTER:
-			cout << "Invalid escaped character." << endl; break;
-		case PARSE_INVALID_UNICODE_HEX:
-			cout << "Invalid unicode hexadecimal digits." << endl; break;
-		case PARSE_MISS_QUOTATION_MARK:
-			cout << "Miss quotation mark in string." << endl; break;
-		case PARSE_INVALID_STRING_CHAR:
-			cout << "Invalid char in string." << endl; break;
-		case PARSE_INVALID_UNICODE_SURROGATE:
-			cout << "Invalid unicode surrogate in string." << endl; break;
-		default:
-			cout << "Unexpected error." << endl;
-	}
-//	if (code == PARSE_OK) {
-//		cout << "Json generator:\n" << generator() << endl;
-//	}
 }
 
 string getJsonFromFile(const string& filename)

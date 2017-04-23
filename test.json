@@ -1,0 +1,9 @@
+{
+    "false": false,
+    "true": true,
+    "null": null,
+    "number": 123,
+    "string": "ssss",
+    "array": ["123", 234],
+    "object": {"key1": "k1", "key2": "k2"}
+}
