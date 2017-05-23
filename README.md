@@ -1,10 +1,15 @@
 # A simple json parser for practice.
 
 ## Compile && Run
+
+Build project.
+```
+make
+```
+
 Read json from file.
 ```
-sh build.sh
-./rjson test1.txt
+./rjson test.json
 ```
 
 ## Parser Support
