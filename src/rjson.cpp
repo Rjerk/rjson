@@ -1,90 +1,489 @@
-#include "rjson.h"
 #include <fstream>
 #include <sstream>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
+#include "rjson.h"
 
-const size_t STACK_INIT_SIZE = 100;
+using std::cin;
+using std::cout;
+using std::endl;
+using std::cerr;
+using std::string;
 
-bool isdigit_1to9(char ch) { return ch != '0' && isdigit(ch); }
-
-RJson::RJson(const string& js)
+string getJsonFromFile(const string& filename)
 {
-	json = const_cast<char*>(js.data());
-	stack = new char[STACK_INIT_SIZE];
-	top = 0;
-	size = STACK_INIT_SIZE;
-	v.type = RJSON_NULL;
+	std::ifstream t(filename);
+	std::stringstream buffer;
+	buffer << t.rdbuf();
+	return buffer.str();
 }
 
-RJson::~RJson()
+namespace {
+
+bool isdigit_1to9(char ch)
 {
-	freeValue(&v);
-	delete [] stack;
-	json = nullptr;
+	return ch != '0' && isdigit(ch);
 }
 
-parse_code RJson::parseJson()
+constexpr size_t STACK_INIT_SIZE = 100;
+
+void freeValue(rjson::JsonValue* v)
+{
+    using namespace rjson;
+	assert(v != NULL);
+	switch (v->getType()) {
+		case RJSON_STRING:
+			delete v->getString();
+			break;
+		case RJSON_OBJECT:
+			for (size_t i = 0; i < v->getObjSize(); ++i) {
+				delete v->getPair()[i].str_;
+				freeValue(&v->getPair()[i].value_);
+			}
+			delete [] v->getPair();
+			break;
+		case RJSON_ARRAY:
+			for (size_t i = 0; i < v->getArraySize(); ++i) {
+				freeValue(&v->getArray()[i]);
+			}
+			delete [] v->getArray();
+			break;
+		default:
+			break;
+	}
+	v->setType(RJSON_NULL);
+}
+
+}
+
+namespace rjson {
+
+JsonValue::JsonValue()
+{
+    type_ = RJSON_NULL;
+}
+
+JsonValue::~JsonValue()
+{
+}
+
+double JsonValue::getNumber() const
+{
+    assert(type_ == RJSON_NUMBER);
+    return num_;
+}
+
+std::string* JsonValue::getString() const
+{
+    assert(type_ == RJSON_STRING);
+    return str_;
+}
+
+void JsonValue::setString(string* str)
+{
+    str_ = str;
+}
+
+json_pair_t* JsonValue::getPair() const
+{
+    assert(type_ == RJSON_OBJECT);
+    return pair_;
+}
+
+void JsonValue::setPair(json_pair_t* pair)
+{
+    pair_ = pair;
+}
+
+json_value_t* JsonValue::getArray() const
+{
+    return elem_;
+}
+
+JsonValue* JsonValue::getValueFromObject(const string& key)
+{
+    assert(type_ == RJSON_OBJECT && obj_size_ != 0 && key.size() != 0);
+    for (size_t i = 0; i < obj_size_; ++i) {
+        if (*(pair_[i].str_) == key) {
+            return &(pair_[i].value_);
+        }
+    }
+    return nullptr;
+}
+
+JsonParser::JsonParser(const string& json)
+	: json_(json.data()), value_(), stack_(new char[STACK_INIT_SIZE]),
+	  top_(0), size_(STACK_INIT_SIZE)
+{
+}
+
+JsonParser::~JsonParser()
+{
+    freeValue(&value_);
+	delete [] stack_;
+}
+
+parse_code JsonParser::parseJson()
 {
 	cleanWhitespace();
 	parse_code code;
-	if ((code = parseValue(&v)) == PARSE_OK) {
+	if ((code = parseValue(&value_)) == PARSE_OK) {
 		cleanWhitespace();
-		if (*json != '\0')
+		if (*json_ != '\0') {
 			code = PARSE_NOT_SINGULAR_VALUE;
+		}
 	}
 	return code;
 }
 
-json_type RJson::getValueType(json_value_t* val)
+parse_code JsonParser::parseValue(json_value_t* v)
 {
-	assert(val);
-	return val->type;
+	switch (*json_) {
+		case 't':  return parseLiteral(v, "true", RJSON_TRUE);
+		case 'f':  return parseLiteral(v, "false", RJSON_FALSE);
+		case 'n':  return parseLiteral(v, "null", RJSON_NULL);
+		case '"': return parseString(v);
+		case '{':  return parseObject(v);
+		case '[':  return parseArray(v);
+		case '\0': return PARSE_OK;
+		default:   return parseNumber(v);
+	}
+	return PARSE_INVALID_VALUE;
 }
 
-double RJson::getNumber(json_value_t* val)
+parse_code JsonParser::parseLiteral(json_value_t* v, const string& literal, const json_type type)
 {
-	assert(val && val->type == RJSON_NUMBER);
-	return val->num;
-}
-
-string RJson::getString(json_value_t* val)
-{
-	assert(val && val->type == RJSON_STRING);
-	return string(val->s);
-}
-
-size_t RJson::getStringLen(json_value_t* val)
-{
-	assert(val && val->type == RJSON_STRING);
-	return val->len;
-}
-
-size_t RJson::getObjectSize(json_value_t* val)
-{
-	assert(val && val->type == RJSON_OBJECT);
-	return val->objSize;
-}
-
-size_t RJson::getArraySize(json_value_t* val)
-{
-	assert(val && val->type == RJSON_ARRAY);
-	return val->arrSize;
-}
-
-json_value_t* RJson::getValueFromObject(const char* str)
-{
-	assert(v.type == RJSON_OBJECT && str != nullptr);
-	for (size_t i = 0; i < v.objSize; ++i) {
-		if (!strcmp(str, v.pair[i].str)) {
-			return &v.pair[i].value;
+	eatChar(literal[0]);
+	size_t i = 0;
+	for (; literal[i+1]; ++i) {
+		if (json_[i] != literal[i+1]) {
+			return PARSE_INVALID_VALUE;
 		}
 	}
-	return nullptr;
+	json_ += i;
+	v->type_ = type;
+	return PARSE_OK;
 }
 
+parse_code JsonParser::parseNumber(json_value_t* v)
+{
+	const char* p = json_;
 
-void RJson::parseCodeHandle(parse_code code)
+	if (*p == '-') {
+		++p;
+	}
+
+	if (*p == '0') {
+		++p;
+	} else {
+		if (!isdigit_1to9(*p)) {
+			return PARSE_INVALID_VALUE;
+		}
+		while (isdigit(*p)) {
+			++p;
+		}
+	}
+
+	if (*p == '.') {
+		++p;
+		if (!isdigit(*p)) {
+			return PARSE_INVALID_VALUE;
+		}
+		while (isdigit(*p)) {
+			++p;
+		}
+	}
+
+	if (*p == 'e' || *p == 'E') {
+		++p;
+		if (*p == '+' || *p == '-') {
+			++p;
+		}
+		if (!isdigit(*p)) {
+			return PARSE_INVALID_VALUE;
+		}
+		while (isdigit(*p)) {
+			++p;
+		}
+	}
+
+	errno = 0;
+	double num = std::strtod(json_, NULL);
+	if ((errno == ERANGE) || (num == HUGE_VAL) || (num == -HUGE_VAL)) {
+		return PARSE_NUMBER_TOO_BIG;
+	}
+
+    v->type_ = RJSON_NUMBER;
+    v->num_ = num;
+	json_ = p;
+	return PARSE_OK;
+}
+
+parse_code JsonParser::parseString(json_value_t* v)
+{
+	parse_code ret;
+	char* s;
+	size_t len;
+	if ((ret = parseStringRaw(&s, &len)) == PARSE_OK) {
+		setString(v, s, len);
+	}
+	return ret;
+}
+
+parse_code JsonParser::parseStringRaw(char** str, size_t* len)
+{
+	eatChar('\"');
+	const char* p = json_;
+	size_t pos = top_;
+	for ( ; ; ) {
+		char ch = *p++;
+		switch (ch) {
+			case '\"':
+				*len = top_ - pos;
+				*str = (char*) popJson (*len);
+				//*str[*len] = '\0';
+				json_ = p;
+				return PARSE_OK;
+			case '\\': {
+				switch (*p++) {
+					case '\"': *((char*) pushJson(sizeof(ch))) = '\"'; break;
+					case '\\': *((char*) pushJson(sizeof(ch))) = '\\'; break;
+					case '/':  *((char*) pushJson(sizeof(ch))) = '/';  break;
+					case 'b':  *((char*) pushJson(sizeof(ch))) = '\b'; break;
+					case 'f':  *((char*) pushJson(sizeof(ch))) = '\f'; break;
+					case 'n':  *((char*) pushJson(sizeof(ch))) = '\n'; break;
+					case 'r':  *((char*) pushJson(sizeof(ch))) = '\r'; break;
+					case 't':  *((char*) pushJson(sizeof(ch))) = '\t'; break;
+					case 'u': {
+						unsigned u, u2;
+
+						if (!(p = parse4HexDigits(p, &u))) {
+							top_ = pos;
+							return PARSE_INVALID_UNICODE_HEX;
+						}
+						// if the first codepoint is high surrogate, then we should handle low surrogate.
+						if (0xD800 <= u && u <= 0xDBFF) {
+							if (*p++ != '\\') {
+								top_ = pos;
+								return PARSE_INVALID_UNICODE_SURROGATE;
+							}
+							if (*p++ != 'u') {
+								top_ = pos;
+								return PARSE_INVALID_UNICODE_SURROGATE;
+							}
+							if (!(p = parse4HexDigits(p, &u2))) {
+								top_ = pos;
+								return PARSE_INVALID_UNICODE_HEX;
+							}
+							if (u2 < 0xDC00 || u2 > 0xDFFF) {
+								top_ = pos;
+								return PARSE_INVALID_UNICODE_SURROGATE;
+							}
+							u = (((u - 0xD800) << 10) | (u2 - 0xDC00)) + 0x1000;
+						}
+						encodeUTF8(u);
+						break;
+					}
+					default:
+						top_ = pos;
+						return PARSE_INVALID_ESCAPE_CHARCTER;
+				}
+				break;
+			}
+			case '\0':
+				top_ = pos;
+				return PARSE_MISS_QUOTATION_MARK;
+			default:
+				if ((unsigned char) ch < 0x20) {
+					top_ = pos;
+					return PARSE_INVALID_STRING_CHAR;
+				}
+				*((char*) pushJson(sizeof(ch))) = ch;
+		}
+	}
+}
+
+void JsonParser::setString(json_value_t* v, const char* str, size_t len)
+{
+	assert(v != nullptr && (str != NULL || len == 0));
+	freeValue(v);
+    v->str_ = new string(str, len);
+    v->type_ = RJSON_STRING;
+}
+
+void* JsonParser::pushJson(size_t sz)
+{
+	assert(sz > 0);
+	while (sz + top_ >= size_) {
+		size_ += (size_ >> 1);
+	}
+
+	char* tmp = new char[size_];
+	memcpy(tmp, stack_, top_);
+	stack_ = tmp;
+	tmp = nullptr;
+
+	int t = top_;
+	top_ += sz;
+	return stack_ + t;
+}
+
+void* JsonParser::popJson(size_t sz)
+{
+	assert(sz <= top_);
+	return stack_ + (top_ -= sz);
+}
+
+const char* JsonParser::parse4HexDigits(const char* p, unsigned* u)
+{
+	std::stringstream ss;
+	string hex4;
+	*u = 0;
+	for (int i = 0; i < 4; ++i) {
+		if (isxdigit(*p)) {
+			hex4 += *p++;
+		} else {
+			return nullptr;
+		}
+	}
+	ss << std::hex << hex4;
+	ss >> *u;
+	return p;
+}
+
+parse_code JsonParser::parseObject(json_value_t* v)
+{
+	eatChar('{');
+	cleanWhitespace();
+
+	if (*json_ == '}') {
+		++json_;
+        v->type_ = RJSON_OBJECT;
+		v->pair_ = nullptr;
+		v->obj_size_ = 0;
+		return PARSE_OK;
+	}
+
+	json_pair_t pair;
+	size_t sz = 0;
+	parse_code ret = PARSE_INVALID_VALUE;
+
+	while (true) {
+        v->type_ = RJSON_NULL;
+		pair.value_.type_ = RJSON_NULL;
+
+		// parse string
+		if (*json_ != '\"') {
+			ret = PARSE_MISS_KEY;
+			break;
+		}
+
+		char* str = nullptr;
+		size_t len;
+		if ((ret = parseStringRaw(&str, &len)) != PARSE_OK) {
+			break;
+		}
+
+		pair.str_ = new string(str, len);
+		str = nullptr;
+
+		cleanWhitespace();
+		if (*json_ != ':') {
+			ret = PARSE_MISS_COLON;
+			break;
+		}
+		++json_;
+		cleanWhitespace();
+
+		// parse value
+		if ((ret = parseValue(&pair.value_)) != PARSE_OK) {
+			break;
+		}
+		memcpy(pushJson(sizeof(json_pair_t)), &pair, sizeof(json_pair_t));
+		pair.str_ = nullptr;
+		++sz;
+
+		cleanWhitespace();
+		if (*json_ == ',') {
+			++json_;
+			cleanWhitespace();
+		} else if (*json_ == '}') {
+			++json_;
+            v->type_ = RJSON_OBJECT;
+			v->obj_size_ = sz;
+			size_t sumsize = sizeof(json_pair_t) * sz;
+			memcpy(v->pair_ = new json_pair_t[sz], popJson(sumsize), sumsize);
+			return PARSE_OK;
+		} else {
+			ret = PARSE_MISS_COMMA_OR_CURLY_BRACKET;
+			break;
+		}
+	}
+
+    delete pair.str_;
+	for (size_t i = 0; i < sz; ++i) {
+		auto p = (json_pair_t *) popJson(sizeof(json_pair_t)); (void) p;
+		delete p->str_;
+        freeValue(&(p->value_));
+	}
+
+    v->type_ = RJSON_NULL;
+	return ret;
+}
+
+parse_code JsonParser::parseArray(json_value_t* v)
+{
+	eatChar('[');
+	cleanWhitespace();
+
+	if (*json_ == ']') {
+		++json_;
+        v->type_ = RJSON_ARRAY;
+		v->pair_ = nullptr;
+		v->arr_size_ = 0;
+		return PARSE_OK;
+	}
+
+	size_t sz = 0;
+	parse_code ret = PARSE_INVALID_VALUE;
+
+	while (true) {
+		json_value_t value;
+
+		if ((ret = parseValue(&value)) != PARSE_OK) {
+			break;
+		}
+		memcpy(pushJson(sizeof(json_value_t)), &value, sizeof(json_value_t));
+		++sz;
+
+		cleanWhitespace();
+		if (*json_ == ',') {
+			++json_;
+			cleanWhitespace();
+		} else if (*json_ == ']') {
+			++json_;
+            v->type_ = RJSON_ARRAY;
+			v->arr_size_ = sz;
+			auto sumsz = sz * sizeof(json_value_t);
+			memcpy(v->elem_ = new json_value_t[sz], popJson(sumsz), sumsz);
+			return PARSE_OK;
+		} else {
+			ret = PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+			break;
+		}
+	}
+
+
+	for (size_t i = 0; i < sz; ++i) {
+		freeValue((json_value_t *) popJson(sizeof(json_value_t)));
+	}
+
+    v->type_ = RJSON_NULL;
+	return ret;
+}
+
+void JsonParser::parseCodeHandle(parse_code code)
 {
 	switch (code) {
 		case PARSE_OK:
@@ -118,36 +517,40 @@ void RJson::parseCodeHandle(parse_code code)
 	}
 }
 
-void RJson::stringifyValue(json_value_t* v)
+void JsonParser::stringifyValue(json_value_t* v)
 {
-	switch (v->type) {
+	switch (v->type_) {
 		case RJSON_NULL: memcpy(pushJson(4), "null", 4); break;
 		case RJSON_FALSE: memcpy(pushJson(5), "false", 5); break;
 		case RJSON_TRUE: memcpy(pushJson(4), "true", 4); break;
 		case RJSON_NUMBER:
-			top -= (32 - sprintf((char*)pushJson(32), "%.17g", v->num));
+			// %g print the number with as many as digits as needed for precision,
+			// preferring exponetial syntax when the numbers are small or huge (1e-5 rather than 0.00005)
+			// and skipping any trailing zeroes (1 rather than 1.0000).
+			top_ -= (32 - sprintf((char*)pushJson(32), "%.17g", v->getNumber()));
 			break;
 		case RJSON_STRING:
-			stringifyString(v->s, v->len);
+			stringifyString(v->getString()->data(), v->getString()->size());
 			break;
 		case RJSON_OBJECT:
 			memcpy(pushJson(sizeof('{')), "{", sizeof('{'));
-			for (size_t i = 0; i < v->objSize; ++i) {
+			for (size_t i = 0; i < v->obj_size_; ++i) {
 				if (i > 0) {
 					memcpy(pushJson(sizeof(',')), ",", sizeof(','));
 				}
-				stringifyString(v->pair[i].str, v->pair[i].len);
+				stringifyString(v->pair_[i].str_->data(), v->pair_[i].str_->size());
 				memcpy(pushJson(sizeof(':')), ":", sizeof(':'));
-				stringifyValue(&v->pair[i].value);
+				stringifyValue(&v->pair_[i].value_);
 			}
 			memcpy(pushJson(sizeof('}')), "}", sizeof('}'));
 			break;
 		case RJSON_ARRAY:
 			memcpy(pushJson(sizeof('[')), "[", sizeof('['));
-			for (size_t i = 0; i < v->arrSize; ++i) {
-				if (i > 0)
+			for (size_t i = 0; i < v->arr_size_; ++i) {
+				if (i > 0) {
 					memcpy(pushJson(sizeof(',')), ",", sizeof(','));
-				stringifyValue(&v->elem[i]);
+				}
+				stringifyValue(&v->elem_[i]);
 			}
 			memcpy(pushJson(sizeof(']')), "]", sizeof(']'));
 			break;
@@ -156,17 +559,17 @@ void RJson::stringifyValue(json_value_t* v)
 	}
 }
 
-void RJson::stringifyString(const char* str, size_t len)
+void JsonParser::stringifyString(const char* str, size_t len)
 {
 	assert(str != nullptr);
-	const char hexDigits[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+	const char hex_digits[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 	size_t size;
 	char* head = nullptr;
 	char* p = nullptr;
-	p = head = (char*)pushJson(size = len*6+2);// "\u00xx..."
+	p = head = (char *) pushJson(size = len * 6 + 2); // if there's len unicode characters. 2 is for quotation marks.
 	*p++ = '"';
 	for (size_t i = 0; i < len; ++i) {
-		unsigned char ch = (unsigned char)str[i];
+		auto ch = static_cast<unsigned char>(str[i]);
 		switch (ch) {
 			case '\"': *p++ = '\\'; *p++ = '\"'; break;
             case '\\': *p++ = '\\'; *p++ = '\\'; break;
@@ -179,392 +582,44 @@ void RJson::stringifyString(const char* str, size_t len)
             default:
             	if (ch < 0x20) {
             		*p++ = '\\'; *p++ = 'u'; *p++ = '0'; *p++ = '0';
-            		*p++ = hexDigits[ch >> 4];
-            		*p++ = hexDigits[ch & 15];
+            		*p++ = hex_digits[ch >> 4];
+            		*p++ = hex_digits[ch & 15];
 				} else {
 					*p++ = str[i];
 				}
 		}
 	}
 	*p++ = '"';
-	top -= (size - (p - head));
+	top_ -= (size - (p - head));
 }
 
-string RJson::generator()
+string JsonParser::generator()
 {
-	stringifyValue(&v);
-	return string((const char*)popJson(top));
+	assert(stack_);
+	assert(value_.type_ == RJSON_OBJECT || value_.type_ == RJSON_ARRAY);
+	stringifyValue(&value_);
+	auto sz = top_;
+	return string((char *) popJson(top_), sz);
 }
 
-parse_code RJson::parseValue(json_value_t* v)
+void JsonParser::encodeUTF8(unsigned u)
 {
-	switch (*json) {
-		case 't':  return parseLiteral(v, "true", RJSON_TRUE);
-		case 'f':  return parseLiteral(v, "false", RJSON_FALSE);
-		case 'n':  return parseLiteral(v, "null", RJSON_NULL);
-		case '\"': return parseString(v);
-		case '{':  return parseObject(v);
-		case '[':  return parseArray(v);
-		case '\0': return PARSE_OK;
-		default:   return parseNumber(v);
-	}
-	return PARSE_INVALID_VALUE;
-}
-
-parse_code RJson::parseLiteral(json_value_t* v, const string& literal, const json_type type)
-{
-	eatChar(literal[0]);
-	size_t i = 0;
-	for (; literal[i+1]; ++i) {
-		if (json[i] != literal[i+1])
-			return PARSE_INVALID_VALUE;
-	}
-	json += i;
-	v->type = type;
-	return PARSE_OK;
-}
-
-parse_code RJson::parseNumber(json_value_t* v)
-{
-	const char* p = json;
-	if (*p == '-')
-		++p;
-
-	if (*p == '0') {
-		++p;
+	if (u <= 0x7F) { // 0xxxxxxx
+		*((char*) pushJson(sizeof(char))) = (u & 0xFF);
+	} else if (u <= 0x7FF) { // 110xxxxx 10xxxxxx
+		*((char*) pushJson(sizeof(char))) = (0xC0 | ((u >> 6) & 0xFF));
+		*((char*) pushJson(sizeof(char))) = (0x80 | ( u       & 0x3F));
+	} else if (u <= 0xFFFF) { // 1110xxxx 10xxxxxx 10xxxxxx
+		*((char*) pushJson(sizeof(char))) = (0xE0 | ((u >> 12) & 0xFF));
+		*((char*) pushJson(sizeof(char))) = (0x80 | ((u >>  6) & 0x3F));
+		*((char*) pushJson(sizeof(char))) = (0x80 | ( u        & 0x3F));
 	} else {
-		if (!isdigit_1to9(*p)) return PARSE_INVALID_VALUE;
-		while (isdigit(*p)) ++p;
-	}
-
-	if (*p == '.') {
-		++p;
-		if (!isdigit(*p)) return PARSE_INVALID_VALUE;
-		while (isdigit(*p)) ++p;
-	}
-
-	if (*p == 'e' || *p == 'E') {
-		++p;
-		if (*p == '+' || *p == '-')
-			++p;
-		if (!isdigit(*p)) return PARSE_INVALID_VALUE;
-		while (isdigit(*p)) ++p;
-	}
-	errno = 0;
-	double d = std::strtod(json, NULL);
-	if ((errno == ERANGE) || (d == HUGE_VAL) || (d == -HUGE_VAL))
-		return PARSE_NUMBER_TOO_BIG;
-	v->num = d;
-	v->type = RJSON_NUMBER;
-	json = p;
-	return PARSE_OK;
-}
-
-void* RJson::pushJson(size_t sz)
-{
-	assert(sz > 0);
-	while (sz + top >= size)
-		size += (size >> 1);
-	char* tmp = new char[size];
-	memcpy(tmp, stack, top);
-	stack = tmp;
-	tmp = nullptr;
-
-	int t = top;
-	top += sz;
-	return stack + t;
-}
-
-void* RJson::popJson(size_t sz)
-{
-	assert(sz <= top);
-	return stack + (top -= sz);
-}
-
-const char* RJson::parse4HexDigits(const char* p, unsigned* u)
-{
-	std::stringstream ss;
-	string hex4;
-	*u = 0;
-	for (int i = 0; i < 4; ++i) {
-		if (isxdigit(*p))
-			hex4 += *p++;
-		else
-			return NULL;
-	}
-	ss << std::hex << hex4;
-	ss >> *u;
-	return p;
-}
-
-void RJson::encodeUTF8(unsigned u)
-{
-	if (u <= 0x7F) { // xxxxxxx -> 0xxxxxxx
-		*((char*)pushJson(sizeof(char))) = (u & 0xFF);
-	} else if (u <= 0x7FF) { // xxxxx xxxxxx -> 110xxxxx 10xxxxxx
-		*((char*)pushJson(sizeof(char))) = (0xC0 | ((u >> 6) & 0xFF));
-		*((char*)pushJson(sizeof(char))) = (0x80 | ( u       & 0x3F));
-	} else if (u <= 0xFFFF) { // xxxx xxxxxx xxxxxx -> 1110xxxx 10xxxxxx 10xxxxxx
-		*((char*)pushJson(sizeof(char))) = (0xE0 | ((u >> 12) & 0xFF));
-		*((char*)pushJson(sizeof(char))) = (0x80 | ((u >>  6) & 0x3F));
-		*((char*)pushJson(sizeof(char))) = (0x80 | ( u        & 0x3F));
-	} else {
-		assert(u <= 0x10FFFF);// xxx xxxxxx xxxxxx xxxxxx -> 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
-		*((char*)pushJson(sizeof(char))) = (0xF0 | ((u >> 18) & 0xFF));
-		*((char*)pushJson(sizeof(char))) = (0x80 | ((u >> 12) & 0x3F));
-		*((char*)pushJson(sizeof(char))) = (0x80 | ((u >>  6) & 0x3F));
-		*((char*)pushJson(sizeof(char))) = (0x80 | ( u        & 0x3F));
+		assert(u <= 0x10FFFF); // 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+		*((char*) pushJson(sizeof(char))) = (0xF0 | ((u >> 18) & 0xFF));
+		*((char*) pushJson(sizeof(char))) = (0x80 | ((u >> 12) & 0x3F));
+		*((char*) pushJson(sizeof(char))) = (0x80 | ((u >>  6) & 0x3F));
+		*((char*) pushJson(sizeof(char))) = (0x80 | ( u        & 0x3F));
 	}
 }
 
-parse_code RJson::parseStringRaw(json_value_t* v, char** str, size_t* len)
-{
-	eatChar('\"');
-	const char* p = json;
-	size_t pos = top;
-	unsigned u, u2;
-	for (;;) {
-		char ch = *p++;
-		switch (ch) {
-			case '\"':
-				*len = top - pos;
-				*str = (char*)popJson(*len);
-				//*str[*len] = '\0';
-				json = p;
-				return PARSE_OK;
-			case '\\': {
-				switch (*p++) {
-					case '\"': *((char*)pushJson(sizeof(ch))) = '\"'; break;
-					case '\\': *((char*)pushJson(sizeof(ch))) = '\\'; break;
-					case '/':  *((char*)pushJson(sizeof(ch))) = '/';  break;
-					case 'b':  *((char*)pushJson(sizeof(ch))) = '\b'; break;
-					case 'f':  *((char*)pushJson(sizeof(ch))) = '\f'; break;
-					case 'n':  *((char*)pushJson(sizeof(ch))) = '\n'; break;
-					case 'r':  *((char*)pushJson(sizeof(ch))) = '\r'; break;
-					case 't':  *((char*)pushJson(sizeof(ch))) = '\t'; break;
-					case 'u': {
-						if (!(p = parse4HexDigits(p, &u))) {
-							top = pos;
-							return PARSE_INVALID_UNICODE_HEX;
-						}
-						// first codepoint is high surrogate, then handle low surrogate
-						if (u >= 0xD800 && u <= 0xDBFF) {
-							if (*p++ != '\\') {
-								top = pos;
-								return PARSE_INVALID_UNICODE_SURROGATE;
-							}
-							if (*p++ != 'u') {
-								top = pos;
-								return PARSE_INVALID_UNICODE_SURROGATE;
-							}
-							if (!(p = parse4HexDigits(p, &u2))) {
-								top = pos;
-								return PARSE_INVALID_UNICODE_HEX;
-							}
-							if (u2 < 0xDC00 || u2 > 0xDFFF) {
-								top = pos;
-								return PARSE_INVALID_UNICODE_SURROGATE;
-							}
-							// codepoint = 0x10000 + (H - 0xD800) × 0x400 + (L - 0xDC00)
-							u = (((u - 0xD800) << 10) | (u2 - 0xDC00)) + 0x1000;
-						}
-						encodeUTF8(u);
-						break;
-					}
-					default:
-						top = pos;
-						return PARSE_INVALID_ESCAPE_CHARCTER;
-				}
-				break;
-			}
-			case '\0':
-				top = pos;
-				return PARSE_MISS_QUOTATION_MARK;
-			default:
-				if ((unsigned char) ch < 0x20) {
-					top = pos;
-					return PARSE_INVALID_STRING_CHAR;
-				}
-				*((char*)pushJson(sizeof(ch))) = ch;
-		}
-	}
-}
-
-void RJson::setString(json_value_t*v, const char* str, size_t len)
-{
-	assert(v != NULL && (str != NULL || len == 0));
-	freeValue(v);
-	v->s = new char[len+1];
-	memcpy(v->s, str, len);
-	v->s[len] = '\0';
-	v->len = len;
-	v->type = RJSON_STRING;
-}
-
-parse_code RJson::parseString(json_value_t* v)
-{
-	parse_code ret;
-	char* s;
-	size_t len;
-	if ((ret = parseStringRaw(v, &s, &len)) == PARSE_OK) {
-		setString(v, s, len);
-	}
-	return ret;
-}
-
-parse_code RJson::parseObject(json_value_t* v)
-{
-	eatChar('{');
-	cleanWhitespace();
-	if (*json == '}') {
-		++json;
-		v->type = RJSON_OBJECT;
-		v->pair = nullptr;
-		v->objSize = 0;
-		return PARSE_OK;
-	}
-
-	json_pair_t pair;
-	size_t sz = 0;
-	parse_code ret = PARSE_INVALID_VALUE;
-
-	while (true) {
-		char* str = nullptr;
-		v->type = RJSON_NULL;
-		pair.str = nullptr;
-		pair.len = 0;
-		pair.value.type = RJSON_NULL;
-		// parse string
-		if (*json != '\"') {
-			ret = PARSE_MISS_KEY;
-			break;
-		}
-		if ((ret = parseStringRaw(v, &str, &pair.len)) != PARSE_OK)
-			break;
-		memcpy(pair.str = new char[pair.len+1], str, pair.len);
-		pair.str[pair.len] = '\0';
-		str = nullptr;
-
-		cleanWhitespace();
-		if (*json != ':') {
-			ret = PARSE_MISS_COLON;
-			break;
-		}
-		++json;
-		cleanWhitespace();
-		// parse value
-		if ((ret = parseValue(&pair.value)) != PARSE_OK)
-			break;
-		memcpy(pushJson(sizeof(json_pair_t)), &pair, sizeof(json_pair_t));
-		pair.str = nullptr;
-		++sz;
-
-		cleanWhitespace();
-		if (*json == ',') {
-			++json;
-			cleanWhitespace();
-		} else if (*json == '}') {
-			size_t sumsize = sizeof(json_pair_t) * sz;
-			++json;
-			v->type = RJSON_OBJECT;
-			v->objSize = sz;
-			memcpy(v->pair = new json_pair_t[sumsize], popJson(sumsize), sumsize);
-			return PARSE_OK;
-		} else {
-			ret = PARSE_MISS_COMMA_OR_CURLY_BRACKET;
-			break;
-		}
-	}
-
-	delete [] pair.str;
-	for (size_t i = 0; i < sz; ++i) {
-		json_pair_t* p = (json_pair_t*)popJson(sizeof(json_pair_t));
-		delete [] p->str;
-		freeValue(v);
-	}
-
-	v->type = RJSON_NULL;
-	return ret;
-}
-
-parse_code RJson::parseArray(json_value_t* v)
-{
-	eatChar('[');
-	cleanWhitespace();
-	if (*json == ']') {
-		++json;
-		v->type = RJSON_ARRAY;
-		v->pair = nullptr;
-		v->arrSize = 0;
-		return PARSE_OK;
-	}
-
-	size_t sz = 0;
-	parse_code ret = PARSE_INVALID_VALUE;
-
-	while (true) {
-		v->type = RJSON_NULL;
-		json_value_t value;
-		value.type = RJSON_NULL;
-		
-		if ((ret = parseValue(&value)) != PARSE_OK)
-			break;
-		memcpy(pushJson(sizeof(json_value_t)), &value, sizeof(json_value_t));
-		++sz;
-
-		cleanWhitespace();
-		if (*json == ',') {
-			++json;
-			cleanWhitespace();
-		} else if (*json == ']') {
-			++json;
-			v->type = RJSON_ARRAY;
-			v->arrSize = sz;
-			sz *= sizeof(json_value_t);
-			memcpy(v->elem = new json_value_t[sz], popJson(sz), sz);
-			return PARSE_OK;
-		} else {
-			ret = PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
-			break;
-		}
-	}
-
-	for (size_t i = 0; i < sz; ++i)
-		freeValue((json_value_t*)popJson(sizeof(json_value_t)));
-
-	v->type = RJSON_NULL;
-	return ret;
-}
-
-void RJson::freeValue(json_value_t* v)
-{
-	assert(v != NULL);
-	switch (v->type) {
-		case RJSON_STRING:
-			delete [] v->s;
-			break;
-		case RJSON_OBJECT:
-			for (size_t i = 0; i < v->objSize; ++i) {
-				delete [] v->pair[i].str;
-				freeValue(&v->pair[i].value);
-			}
-			delete [] v->pair;
-			break;
-		case RJSON_ARRAY:
-			for (size_t i = 0; i < v->arrSize; ++i)
-				freeValue(&v->elem[i]);
-			delete [] v->elem;
-			break;
-		default:
-			break;
-	}
-	v->type = RJSON_NULL;
-}
-
-string getJsonFromFile(const string& filename)
-{
-	std::ifstream t(filename);
-	std::stringstream buffer;
-	buffer << t.rdbuf();
-	return buffer.str();
 }

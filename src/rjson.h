@@ -1,52 +1,65 @@
+#ifndef RJSON_H
+#define RJSON_H
+
 #include <string>
 #include <iostream>
 #include <cassert>
 #include <cctype>
 
-using std::cin;
-using std::cout;
-using std::endl;
-using std::cerr;
-using std::string;
+#include "noncopyable.h"
 
-string getJsonFromFile(const string& filename);
-
-using json_value_t = struct json_value;
-using json_pair_t = struct json_pair;
+namespace rjson {
 
 enum json_type {
-	RJSON_STRING,
-	RJSON_NUMBER,
-	RJSON_OBJECT,
-	RJSON_ARRAY,
-	RJSON_FALSE,
-	RJSON_TRUE,
-	RJSON_NULL
+    RJSON_STRING,
+    RJSON_NUMBER,
+    RJSON_OBJECT,
+    RJSON_ARRAY,
+    RJSON_FALSE,
+    RJSON_TRUE,
+    RJSON_NULL
 };
 
-struct json_value {
-	json_type type;
-	union {
-		double num; // number
-		struct {
-			char* s;
-			size_t len;
-		};
-		struct { // object
-			json_pair_t* pair;
-			size_t objSize;
-		};
-		struct { // array
-			json_value_t* elem;
-			size_t arrSize;
-		};
-	};
+using json_pair_t = struct json_pair;
+
+using json_value_t = class JsonValue;
+
+struct json_pair;
+
+class JsonValue {
+    friend class JsonParser;
+public:
+    JsonValue();
+    ~JsonValue();
+
+    json_type getType() const { return type_; }
+    void setType(json_type type) { type_ = type; }
+    double getNumber() const;
+    void setNumber(double num) { num_ = num; }
+    std::string* getString() const;
+    void setString(std::string* str);
+    json_pair_t* getPair() const;
+    void setPair(json_pair_t* pair);
+    json_value_t* getArray() const;
+    size_t getArraySize() const { return arr_size_; }
+    size_t getObjSize() const { return obj_size_; }
+    JsonValue* getValueFromObject(const std::string& key);
+
+private:
+    json_type type_;
+    union {
+        double num_;
+        std::string* str_;
+        struct { json_pair_t* pair_; size_t obj_size_; };
+        struct { json_value_t* elem_; size_t arr_size_; };
+    };
 };
 
 struct json_pair {
-	char* str;
-	size_t len;
-	json_value_t value;
+    json_pair(): str_(nullptr), value_() { }
+    ~json_pair() { }
+	std::string* str_;
+	JsonValue value_;
 };
 
 enum parse_code {
@@ -65,43 +78,44 @@ enum parse_code {
 	PARSE_MISS_COMMA_OR_SQUARE_BRACKET
 };
 
-class RJson {
+class JsonParser : noncopyable {
 public:
-	RJson(const string& js);
-	~RJson();
+	explicit JsonParser(const std::string& js);
+	~JsonParser();
+
 	parse_code parseJson();
-	string generator();
+	std::string generator();
 	void parseCodeHandle(parse_code code);
-	json_type getValueType(json_value_t* v);
-	double getNumber(json_value_t* v);
-	string getString(json_value_t* v);
-	size_t getStringLen(json_value_t* v);
-	size_t getObjectSize(json_value_t* v);
-	size_t getArraySize(json_value_t* v);
-	json_value_t* getValueFromObject(const char* str);
+    JsonValue* getValue() { return &value_; }
 private:
 	parse_code parseValue(json_value_t* v);
-	parse_code parseLiteral(json_value_t* v, const string& literal, json_type type);
-	parse_code parseString(json_value_t* v);
-	parse_code parseStringRaw(json_value_t* v, char** str, size_t* len);
+	parse_code parseLiteral(json_value_t* v, const std::string& literal, json_type type);
 	parse_code parseNumber(json_value_t* v);
+	parse_code parseString(json_value_t* v);
+	parse_code parseStringRaw(char** str, size_t* len);
 	parse_code parseObject(json_value_t* v);
 	parse_code parseArray(json_value_t* v);
+
 	void* pushJson(size_t sz);
 	void* popJson(size_t sz);
 	void stringifyValue(json_value_t* v);
 	void stringifyString(const char* str, size_t len);
-	void freeValue(json_value_t* v);
 	void setString(json_value_t* v, const char* str, size_t len);
 	void encodeUTF8(unsigned u);
 	const char* parse4HexDigits(const char* p, unsigned* u);
-	void cleanWhitespace() { while (isspace(*json)) ++json; }
-	void eatChar(char ch) { assert(*json == ch); ++json; }
+	void cleanWhitespace() { while (isspace(*json_)) ++json_; }
+	void eatChar(char ch) { assert(*json_ == ch); (void) ch; ++json_; }
 private:
-	const char* json;
-	json_value_t v;
-private:
-	char* stack;
-	size_t top;
-	size_t size;
+	const char* json_;
+	JsonValue value_;
+
+	char* stack_;
+	size_t top_;
+	size_t size_;
 };
+
+}
+
+std::string getJsonFromFile(const std::string& filename);
+
+#endif
