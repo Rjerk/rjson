@@ -45,7 +45,7 @@ void freeValue(rjson::JsonValue* v)
 			break;
 		case RJSON_ARRAY:
 			for (size_t i = 0; i < v->getArraySize(); ++i) {
-				freeValue(&v->getArray()[i]);
+				freeValue(&(v->getArray()[i]));
 			}
 			delete [] v->getArray();
 			break;
@@ -321,6 +321,7 @@ void* JsonParser::pushJson(size_t sz)
 
 	char* tmp = new char[size_];
 	memcpy(tmp, stack_, top_);
+    delete [] stack_;
 	stack_ = tmp;
 	tmp = nullptr;
 
