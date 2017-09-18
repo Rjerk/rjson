@@ -11,9 +11,9 @@ using std::endl;
 using std::cerr;
 using std::string;
 
-string getJsonFromFile(const string& filename)
+string getJsonFromFile(const char* filename)
 {
-	std::ifstream t(filename);
+	std::ifstream t(string{filename});
 	std::stringstream buffer;
 	buffer << t.rdbuf();
 	return buffer.str();
@@ -33,7 +33,7 @@ void freeValue(rjson::JsonValue* v)
     using namespace rjson;
 	assert(v != NULL);
 	switch (v->getType()) {
-		case RJSON_STRING:
+        case RJSON_STRING:
 			delete v->getString();
 			break;
 		case RJSON_OBJECT:
@@ -42,7 +42,7 @@ void freeValue(rjson::JsonValue* v)
 				freeValue(&v->getPair()[i].value_);
 			}
 			delete [] v->getPair();
-			break;
+            break;
 		case RJSON_ARRAY:
 			for (size_t i = 0; i < v->getArraySize(); ++i) {
 				freeValue(&(v->getArray()[i]));
@@ -112,19 +112,19 @@ JsonValue* JsonValue::getValueFromObject(const string& key)
     return nullptr;
 }
 
-JsonParser::JsonParser(const string& json)
-	: json_(json.data()), value_(), stack_(new char[STACK_INIT_SIZE]),
+RJSON::RJSON(const string& json)
+	: json_text_(json), json_(json_text_.data()), value_(), stack_(new char[STACK_INIT_SIZE]),
 	  top_(0), size_(STACK_INIT_SIZE)
 {
 }
 
-JsonParser::~JsonParser()
+RJSON::~RJSON()
 {
     freeValue(&value_);
 	delete [] stack_;
 }
 
-parse_code JsonParser::parseJson()
+parse_code RJSON::parseJson()
 {
 	cleanWhitespace();
 	parse_code code;
@@ -134,10 +134,21 @@ parse_code JsonParser::parseJson()
 			code = PARSE_NOT_SINGULAR_VALUE;
 		}
 	}
-	return code;
+    return code;
 }
 
-parse_code JsonParser::parseValue(json_value_t* v)
+void RJSON::setJsonText(const string& js)
+{
+    json_text_.assign(js);
+    json_ = json_text_.data();
+    freeValue(&value_);
+    delete [] stack_;
+    stack_ = new char[STACK_INIT_SIZE];
+    top_ = 0;
+    size_ = STACK_INIT_SIZE;
+}
+
+parse_code RJSON::parseValue(json_value_t* v)
 {
 	switch (*json_) {
 		case 't':  return parseLiteral(v, "true", RJSON_TRUE);
@@ -152,7 +163,7 @@ parse_code JsonParser::parseValue(json_value_t* v)
 	return PARSE_INVALID_VALUE;
 }
 
-parse_code JsonParser::parseLiteral(json_value_t* v, const string& literal, const json_type type)
+parse_code RJSON::parseLiteral(json_value_t* v, const string& literal, const json_type type)
 {
 	eatChar(literal[0]);
 	size_t i = 0;
@@ -166,7 +177,7 @@ parse_code JsonParser::parseLiteral(json_value_t* v, const string& literal, cons
 	return PARSE_OK;
 }
 
-parse_code JsonParser::parseNumber(json_value_t* v)
+parse_code RJSON::parseNumber(json_value_t* v)
 {
 	const char* p = json_;
 
@@ -220,7 +231,7 @@ parse_code JsonParser::parseNumber(json_value_t* v)
 	return PARSE_OK;
 }
 
-parse_code JsonParser::parseString(json_value_t* v)
+parse_code RJSON::parseString(json_value_t* v)
 {
 	parse_code ret;
 	char* s;
@@ -231,7 +242,7 @@ parse_code JsonParser::parseString(json_value_t* v)
 	return ret;
 }
 
-parse_code JsonParser::parseStringRaw(char** str, size_t* len)
+parse_code RJSON::parseStringRaw(char** str, size_t* len)
 {
 	eatChar('\"');
 	const char* p = json_;
@@ -304,7 +315,7 @@ parse_code JsonParser::parseStringRaw(char** str, size_t* len)
 	}
 }
 
-void JsonParser::setString(json_value_t* v, const char* str, size_t len)
+void RJSON::setString(json_value_t* v, const char* str, size_t len)
 {
 	assert(v != nullptr && (str != NULL || len == 0));
 	freeValue(v);
@@ -312,7 +323,7 @@ void JsonParser::setString(json_value_t* v, const char* str, size_t len)
     v->type_ = RJSON_STRING;
 }
 
-void* JsonParser::pushJson(size_t sz)
+void* RJSON::pushJson(size_t sz)
 {
 	assert(sz > 0);
 	while (sz + top_ >= size_) {
@@ -330,13 +341,13 @@ void* JsonParser::pushJson(size_t sz)
 	return stack_ + t;
 }
 
-void* JsonParser::popJson(size_t sz)
+void* RJSON::popJson(size_t sz)
 {
 	assert(sz <= top_);
 	return stack_ + (top_ -= sz);
 }
 
-const char* JsonParser::parse4HexDigits(const char* p, unsigned* u)
+const char* RJSON::parse4HexDigits(const char* p, unsigned* u)
 {
 	std::stringstream ss;
 	string hex4;
@@ -353,7 +364,7 @@ const char* JsonParser::parse4HexDigits(const char* p, unsigned* u)
 	return p;
 }
 
-parse_code JsonParser::parseObject(json_value_t* v)
+parse_code RJSON::parseObject(json_value_t* v)
 {
 	eatChar('{');
 	cleanWhitespace();
@@ -433,7 +444,7 @@ parse_code JsonParser::parseObject(json_value_t* v)
 	return ret;
 }
 
-parse_code JsonParser::parseArray(json_value_t* v)
+parse_code RJSON::parseArray(json_value_t* v)
 {
 	eatChar('[');
 	cleanWhitespace();
@@ -484,7 +495,7 @@ parse_code JsonParser::parseArray(json_value_t* v)
 	return ret;
 }
 
-void JsonParser::parseCodeHandle(parse_code code)
+void RJSON::parseCodeHandle(parse_code code)
 {
 	switch (code) {
 		case PARSE_OK:
@@ -518,7 +529,7 @@ void JsonParser::parseCodeHandle(parse_code code)
 	}
 }
 
-void JsonParser::stringifyValue(json_value_t* v)
+void RJSON::stringifyValue(json_value_t* v)
 {
 	switch (v->type_) {
 		case RJSON_NULL: memcpy(pushJson(4), "null", 4); break;
@@ -560,7 +571,7 @@ void JsonParser::stringifyValue(json_value_t* v)
 	}
 }
 
-void JsonParser::stringifyString(const char* str, size_t len)
+void RJSON::stringifyString(const char* str, size_t len)
 {
 	assert(str != nullptr);
 	const char hex_digits[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
@@ -594,7 +605,7 @@ void JsonParser::stringifyString(const char* str, size_t len)
 	top_ -= (size - (p - head));
 }
 
-string JsonParser::generator()
+string RJSON::generator()
 {
 	assert(stack_);
 	assert(value_.type_ == RJSON_OBJECT || value_.type_ == RJSON_ARRAY);
@@ -603,7 +614,7 @@ string JsonParser::generator()
 	return string((char *) popJson(top_), sz);
 }
 
-void JsonParser::encodeUTF8(unsigned u)
+void RJSON::encodeUTF8(unsigned u)
 {
 	if (u <= 0x7F) { // 0xxxxxxx
 		*((char*) pushJson(sizeof(char))) = (u & 0xFF);

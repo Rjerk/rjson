@@ -6,8 +6,8 @@ all: rjson
 rjson.o: src/rjson.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-rjson: rjson.o src/main.cpp
-	$(CXX) $(CXXFLAGS) -o rjson src/main.cpp rjson.o
+rjson: rjson.o main.cpp
+	$(CXX) $(CXXFLAGS) main.cpp rjson.o -o rjson
 
 clean:
 	rm -f rjson *.o

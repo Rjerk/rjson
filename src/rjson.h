@@ -27,7 +27,7 @@ using json_value_t = class JsonValue;
 struct json_pair;
 
 class JsonValue {
-    friend class JsonParser;
+    friend class RJSON;
 public:
     JsonValue();
     ~JsonValue();
@@ -58,8 +58,8 @@ private:
 struct json_pair {
     json_pair(): str_(nullptr), value_() { }
     ~json_pair() { }
-	std::string* str_;
-	JsonValue value_;
+    std::string* str_;
+    JsonValue value_;
 };
 
 enum parse_code {
@@ -78,12 +78,13 @@ enum parse_code {
 	PARSE_MISS_COMMA_OR_SQUARE_BRACKET
 };
 
-class JsonParser : noncopyable {
+class RJSON : noncopyable {
 public:
-	explicit JsonParser(const std::string& js);
-	~JsonParser();
+	explicit RJSON(const std::string& js);
+	~RJSON();
 
 	parse_code parseJson();
+    void setJsonText(const std::string& js);
 	std::string generator();
 	void parseCodeHandle(parse_code code);
     JsonValue* getValue() { return &value_; }
@@ -106,6 +107,7 @@ private:
 	void cleanWhitespace() { while (isspace(*json_)) ++json_; }
 	void eatChar(char ch) { assert(*json_ == ch); (void) ch; ++json_; }
 private:
+    std::string json_text_;
 	const char* json_;
 	JsonValue value_;
 
@@ -116,6 +118,6 @@ private:
 
 }
 
-std::string getJsonFromFile(const std::string& filename);
+std::string getJsonFromFile(const char* filename);
 
 #endif
